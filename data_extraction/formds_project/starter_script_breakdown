@@ -1,0 +1,80 @@
+#imports
+from bs4 import BeautifulSoup
+import requests
+from requests import get
+import pandas as pd
+import urllib.parse
+import numpy as np
+
+#lists to store data in
+not_comps = [' FormDs.com ', 'Newest', 'Filter', 'Local', '← Previous', 'Next →']
+orgs = []
+industries = []
+funding = []
+new_cash_raised = []
+dates = []
+fr_status = []
+excluded_status = ['Yet to Sell']
+excluded_amount = ['$0']
+
+#url where we are pulling the data from with the page range below
+url = 'https://formds.com/filings/newest?page='
+
+for i in range(1, 6):
+    page = requests.get(url+str(i))
+    soup = BeautifulSoup(page.text, 'html.parser')
+
+    #pulling company name and appending it to orgs list
+    companies = [company.get_text() for company in soup.find_all('a')]
+    for company in companies:
+        if company not in not_comps:
+            orgs.append(company)
+    
+    #pulling industry tag
+    for industry in soup.find_all('span', {'class': 'hidden-xs'}):
+        industries.append(industry.get_text())
+
+    #pulling fr amount and appending it to amount list
+    for amount in soup.find_all('td', {'class': 'hidden-xs'})[0::3]:
+        funding.append(amount.get_text())
+
+    #pulling incremental cash amount and appending to new cash raised list
+    for cash in soup.find_all('td')[3::6]:
+        new_cash_raised.append(cash.get_text())
+
+    #pulling dates and appending to dates list
+    for date in soup.find_all('td', {'class': 'hidden-xs'})[1::3]:
+        dates.append(date.get_text())
+    
+    #pulling new or amended status and appending to fr status list
+    for status in soup.find_all('td', {'class': 'hidden-xs'})[2::3]:
+        fr_status.append(status.get_text())
+
+    #creating dataframe, columns, and adding list data to the dataframe
+    final_results = [orgs, industries, funding, new_cash_raised, dates, fr_status]
+    df = pd.DataFrame(final_results).transpose()
+    df.columns = ['Company Name', 'Industry', 'Funding Amount', 'New Cash Raised', 'Date', 'FR Status']
+
+
+    #removing () from industries
+    df['Industry'] = df['Industry'].str.replace('(', '')
+    df['Industry'] = df['Industry'].str.replace(')', '')
+
+    #removing 'Yet to Sell' statuses
+    df = df[~df['Funding Amount'].isin(excluded_status)]
+    df = df[~df['Funding Amount'].isin(excluded_amount)]
+
+    #creating a separate dataframe and storing rows for specific unwanted industries
+    df_filtered = df[(df['Industry'] == 'Pooled Investment Fund')] 
+    df_filtered = df_filtered.append(df[(df['Industry'] == 'Commercial')]) 
+    df_filtered = df_filtered.append(df[(df['Industry'] == 'Commercial Banking')])
+    df_filtered = df_filtered.append(df[(df['Industry'] == 'Insurance')])
+    df_filtered = df_filtered.append(df[(df['Industry'] == 'Investing')])
+    df_filtered = df_filtered.append(df[(df['Industry'] == 'Investment Banking')])
+    df_filtered = df_filtered.append(df[(df['Industry'] == 'Other Real Estate')])
+    df_filtered = df_filtered.append(df[(df['Industry'] == 'Residential')])
+    
+    #removing those unwanted industries and adding to a final dataframe
+    df_final = df.loc[~((df.Industry.isin(df_filtered['Industry']))),:]
+    
+df_final
