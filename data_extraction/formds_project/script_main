@@ -1,0 +1,56 @@
+from bs4 import BeautifulSoup
+import requests
+from requests import get
+import pandas as pd
+import urllib.parse
+import numpy as np
+from datetime import datetime, timedelta, date
+import re
+
+
+def extract(soup):
+    '''
+    parse the page content and extract the records
+    '''
+    ret = []
+    for row in soup.find_all("table")[0].find_all("tr")[1:]:
+        company, *rest = [i for i in row.children if i.name == "td"]
+        c_name, c_ind = [n for n in company.children if n.text != '\n']
+        company_name = c_name.text.strip()
+        company_industry = c_ind.text.replace("(", "").replace(")", "").strip()
+        ret.append([company_name, company_industry]+[n.text.strip()
+                   for n in rest])
+    return ret
+
+
+def crawl(base, page_num, end_date, acc):
+    '''
+    crawl the website for all data before end_date, assuming the records from the website is date descending.
+    '''
+    url = base+f"/filings/newest?page={page_num}"
+    print(url)
+    page = requests.get(url)
+    soup = BeautifulSoup(page.text, 'html.parser')
+    rows = extract(soup=soup)
+    last_date = datetime.strptime(rows[-1][-2], "%Y-%m-%d").date()
+    is_last_page = acc[-len(rows):] == rows
+    if last_date >= end_date and not is_last_page:
+        return crawl(base, page_num+1, end_date, acc+rows)
+    else:
+        return acc+rows
+
+
+pif = 'Pooled Investment Fund'
+excluded_industries = ['Commercial', 'Commercial Banking',
+                       'Insurance', 'Investing', 'Investment Banking', 'Other Real Estate', 'Residential', 'REITS and Finance']
+headers = ["Company Name", "Industry", "New Filing?",
+           "Reported funding", "Incremental Cash", "Date", "New or Amended"]
+excluded_status = ['Yet to Sell']
+excluded_amount = ['$0']
+
+data = crawl("https://formds.com", 1, date.today() - timedelta(days=1), [])
+df = pd.DataFrame(data, columns=headers)
+df = df[~(df['Industry'].str.startswith(pif)  | df['Industry'].isin(excluded_industries) | df['Reported funding'].isin(excluded_status) | df['Reported funding'].isin(excluded_amount))]
+df.drop_duplicates()
+with open('file_path.csv', 'a') as f:
+    df.to_csv(f, header=False)
